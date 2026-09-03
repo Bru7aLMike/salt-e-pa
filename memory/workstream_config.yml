@@ -1,0 +1,95 @@
+# workstream_config.yml
+# Configuration for the memory scanners (deadline_scanner.py, workspace_scanner.py).
+#
+# Every value below is optional. Each key resolves with a fixed precedence:
+#   1. environment variable (the PA_* name noted per key)
+#   2. the value set here
+#   3. a repo-relative default (shown per key)
+# so the scanners run with zero edits, then you override selectively.
+#
+# A placeholder token like <MEMORY_DIR> means "unset - use the default". Replace
+# a token with a real value to pin it, or delete the line to keep the default.
+
+# --- Filesystem paths the scanners read and write -------------------------
+paths:
+  # Root of the memory tree the scanners walk and regenerate.
+  # env: PA_MEMORY_DIR   default: <repo>/memory
+  memory_dir: <MEMORY_DIR>
+  # Root of the working tree (holds CLAUDE.md, tasks/, data/).
+  # env: PA_WORKING_DIR  default: <repo>
+  working_dir: <WORKING_DIR>
+  # Charter file surfaced in the orientation-file size log.
+  # env: PA_CLAUDE_MD    default: <working_dir>/CLAUDE.md
+  claude_md: <CLAUDE_MD_PATH>
+  # Lifecycle-task orchestration folder scanned for lifecycle-state.md files.
+  # env: PA_TASKS_DIR    default: <working_dir>/tasks
+  tasks_dir: <TASKS_DIR>
+  # External coupling (jira sync, not shipped): cache the Jira briefing reads.
+  # env: PA_JIRA_SYNC_JSON    default: <working_dir>/data/jira-sync.json
+  jira_sync_json: <JIRA_SYNC_JSON>
+
+# --- Locale for date math and generated timestamps ------------------------
+locale:
+  # Fixed UTC offset in hours used to compute "today" and next-run stamps.
+  # env: PA_TZ_OFFSET_HOURS   default: 0
+  utc_offset_hours: <UTC_OFFSET_HOURS>
+  # Short timezone label printed in generated files.
+  # env: PA_TZ_NAME      default: UTC
+  tz_name: <TZ_NAME>
+
+# --- Workstream discovery -------------------------------------------------
+# roots: folders (relative to memory_dir) scanned one level deep for workstream
+# READMEs. exclude: folders to skip. Both ship empty (no workstreams). Fill your
+# own, one per line, matching the three-tier layout (system plus content/*), for
+# example:
+#   roots:
+#     - system
+#     - content/entrepreneurial
+#     - content/work
+roots:
+exclude:
+
+# --- External coupling (jira sync, not shipped) ---------------------------
+# Jira project keys rendered in the BRIEFING activity block, in priority order.
+# Ships empty. Add keys once a jira-sync cache exists, for example:
+#   jira_project_keys:
+#     - <PROJECT_KEY>
+jira_project_keys:
+
+# --- HAS handoff pipeline -------------------------------------------------
+# Paths used by the HAS SessionStart hook (scripts/has/has-session-start.sh).
+# Same 3-level resolution as the paths above: HAS_* env var, then the value
+# here, then a repo-relative default. Both ship as placeholders (use defaults).
+has:
+  # Per-session scratch dir where the SessionStart hook records the transcript
+  # path for /wrap to read back at session end.
+  # env: HAS_WRAP_STATE_DIR   default: $HOME/.claude/wrap-state
+  wrap_state_dir: <HAS_WRAP_STATE_DIR>
+  # Scratch dir for the filter output (filtered_*.txt) and the subagent's
+  # has-output.txt handoff summary.
+  # env: HAS_SCRATCH_DIR      default: <working_dir>/scratch
+  scratch_dir: <HAS_SCRATCH_DIR>
+
+# --- Unslop SessionStart hook ---------------------------------------------
+# Path used by the unslop hook (scripts/inject-unslop.sh). Same 3-level
+# resolution: PA_UNSLOP_SKILL env var, then the value here, then a default.
+unslop:
+  # SKILL.md file whose body is injected as always-active writing guidance.
+  # If absent the hook no-ops, so this stays optional.
+  # env: PA_UNSLOP_SKILL   default: $HOME/.claude/skills/unslop/SKILL.md
+  skill_file: <PA_UNSLOP_SKILL>
+
+# --- Backup remotes (scripts/push-backups.sh, scripts/restore-backups.sh) --
+# The two PRIVATE GitHub backup repos are DELIBERATELY NOT configured here.
+# Real backup URLs are secret-ish and must never live in this TRACKED file, so
+# both backup scripts refuse to read remotes from workstream_config.yml. Set
+# them instead as environment variables:
+#   env: PA_MEMORY_BACKUP_REMOTE    example: your-user/your-memory-backup
+#   env: PA_WORKING_BACKUP_REMOTE   example: your-user/your-working-backup
+# or in a LOCAL git-ignored file (default: memory/backup-remotes.local.yml,
+# override with PA_BACKUP_CONFIG_FILE), which holds a single 'backup:' section:
+#   backup:
+#     memory_remote: your-user/your-memory-backup
+#     working_remote: your-user/your-working-backup
+# Until BOTH remotes are set, push-backups.sh / restore-backups.sh no-op. The
+# repo paths they back up come from paths.memory_dir and paths.working_dir above.

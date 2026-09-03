@@ -1,0 +1,4 @@
+# Shell scripts must check out with LF endings on every platform. A CRLF
+# checkout corrupts the shebang line (#!/usr/bin/env bash\r) and the hook fails
+# to run. This keeps the shipped HAS SessionStart hook executable everywhere.
+*.sh text eol=lf

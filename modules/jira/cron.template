@@ -1,0 +1,31 @@
+# Salt-e PA - optional Jira module scheduled jobs (templates)
+#
+# Both jobs are safe to register at any time: each one no-ops and exits 0
+# unless the module is opted in (PA_JIRA_ENABLED truthy, or jira.enabled: true
+# in memory/workstream_config.yml). Nothing runs on a fresh clone.
+#
+# Setup:
+#   1. Replace <REPO_ROOT> with your clone's absolute path, for example
+#      /home/you/salt-e-pa (Linux/macOS) or C:/Users/you/salt-e-pa (Windows).
+#   2. Export the module env vars so the scheduled run resolves credentials the
+#      same way your interactive shell does. Credentials are environment-only:
+#        PA_JIRA_ENABLED=1
+#        PA_JIRA_BASE_URL=<JIRA_BASE_URL>
+#        PA_JIRA_EMAIL=<JIRA_ACCOUNT_EMAIL>
+#        PA_JIRA_API_TOKEN=<JIRA_API_TOKEN>
+#        PA_JIRA_PROJECT_KEYS=<KEY_A>,<KEY_B>
+#      Put them in the crontab header (KEY=value lines above the jobs) or source
+#      them inline. Never commit the token to this file or any other.
+#   3. See modules/jira/README.md for the full variable reference.
+
+# Daily Jira sync at 07:50 local
+50 7 * * * cd <REPO_ROOT> && python modules/jira/jira_sync.py
+
+# Monthly Jira health audit at 08:20 local on the 1st of the month
+20 8 1 * * cd <REPO_ROOT> && python modules/jira/jira_health_audit.py
+
+# Named-scheduler task-ID prefix convention (if you use one instead of bare
+# crontab lines): give every task ID a short workspace-unique prefix so IDs
+# never collide with other projects on the same machine, for example:
+#   mypa-jira-sync
+#   mypa-jira-health-audit

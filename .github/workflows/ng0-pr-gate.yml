@@ -1,0 +1,68 @@
+# NG-0 public PR gate.
+#
+# Runs on EVERY pull request, including PRs from forks. Forked PRs never receive
+# repository or environment secrets, so this workflow is written to need NONE:
+# it runs the scanner in --patterns-only tier (generic patterns.yml only, zero
+# literal identifiers) plus the scoped memory template-lint. There is
+# deliberately NO `secrets.` reference anywhere in this file - a secret used here
+# would silently no-op on fork PRs and, worse, invites the classic mistake of
+# exposing a maintainer secret to untrusted PR code. This job is safe to run from
+# an untrusted fork.
+#
+# The maintainer-tier scan (literal denylist, git-history across all refs) lives
+# in ng0-release-gate.yml and runs ONLY on the protected default branch.
+
+name: NG-0 PR gate
+
+on:
+  pull_request:
+
+# Least privilege: this job only needs to read the checked-out code.
+permissions:
+  contents: read
+
+jobs:
+  ng0-patterns-only:
+    name: NG-0 patterns-only scan + template-lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          # Full history so the patterns-only history scan is meaningful. This is
+          # safe on forks: no secrets are involved in this workflow.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Full-tree secret + PII scan (patterns-only)
+        run: python scripts/ng0/secret_pii_scan.py --tree . --patterns-only
+
+      - name: Git-history secret + PII scan (patterns-only)
+        run: python scripts/ng0/secret_pii_scan.py --git-history --all-refs --patterns-only
+
+      - name: Memory template-lint (canonical command)
+        # The SINGLE canonical command, identical to scripts/ng0/prepublish_gate.sh
+        # and CONTRIBUTING.md. template_lint.py owns the generic-prose allowlist
+        # (DEFAULT_ALLOWLIST): it lints EVERY file under memory/ except the EXACT
+        # deliberately-generic prose rule files (gated by the PII scan + human
+        # review instead). Everything else - including memory/rules/INDEX.md (a
+        # placeholder template that MUST pass) and any NEW file under
+        # memory/rules/ - is linted. To add a new generic-prose rule, add its
+        # EXACT path to DEFAULT_ALLOWLIST in template_lint.py.
+        run: python scripts/ng0/template_lint.py memory/
+
+      - name: OKF frontmatter conformance (okf_check.py)
+        # The SAME mandatory OKF gate the maintainer prepublish gate runs
+        # (scripts/ng0/prepublish_gate.sh, check 4/4). It is a tree-level check
+        # with NO secret or denylist dependency, so it is safe on fork PRs and
+        # runs here to keep OKF conformance enforced pre-merge: every tracked,
+        # non-exempt Markdown file must carry a non-empty top-level `type:` plus
+        # a one-line summary. A regression fails the PR here, not at release.
+        run: python scripts/ng0/okf_check.py .

@@ -1,0 +1,23 @@
+# Local config and overrides (never committed)
+*.local.*
+settings.local.json
+
+# Credentials and secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+
+# Personal denylist for the secret/PII scanner (literal identifiers)
+denylist.local.txt
+
+# Local backup-repo remotes for scripts/restore-backups.sh (real private URLs)
+backup-remotes.local.yml
+
+# Scanner runtime logs (regenerated on every scan; per-clone, never committed)
+size_log.jsonl
+
+# Python
+__pycache__/
+*.py[cod]

@@ -1,0 +1,19 @@
+# aliases.yml
+# Alias map: each workstream registers here so the scanner can resolve short
+# names to a canonical target. init_workstream.py appends entries automatically
+# under the top-level `workstreams:` list that the workspace scanner reads.
+#
+# Placeholder-only template - ships empty. Fill with your own values; ship no
+# real content. A real entry looks like:
+#
+#   workstreams:
+#     - workstream_id: my-new-thing
+#       display_name: My New Thing
+#       folder: content/work/my-new-thing
+#       status: active
+#       aliases:
+#         - mnt
+#
+# The scanner reads the top-level `workstreams:` list below (empty = none yet).
+
+workstreams:

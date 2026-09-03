@@ -1,0 +1,128 @@
+# NG-0 maintainer release gate.
+#
+# This is the ONLY NG-0 job that handles a secret. It runs the full maintainer
+# tier: the literal-identifier denylist (secrets.NG0_DENYLIST) plus a
+# git-history scan across ALL refs and tags. It exists to catch personal data
+# that the generic patterns cannot - literal names, handles, and identifiers that
+# match no regex - before the tree is published.
+#
+# ---------------------------------------------------------------------------
+# WHO MAY READ THE NG0_DENYLIST SECRET  (read this before changing triggers)
+# ---------------------------------------------------------------------------
+# secrets.NG0_DENYLIST is an ENVIRONMENT secret on the `release` environment (see
+# the `environment:` key on the job). It is read by exactly one step - the
+# "Materialize denylist from secret" step of the `ng0-release-scan` job - and
+# only when that job actually runs. It is NEVER available to a pull_request-
+# triggered job (that is ng0-pr-gate.yml, which is patterns-only and references
+# no secret at all - fork PRs get no secrets), and never to any run the `release`
+# environment's protection rule refuses.
+#
+# WHY THE JOB `if:` GUARD IS NOT SELF-SUFFICIENT (honest threat model)
+# -------------------------------------------------------------------
+# For workflow_dispatch, GitHub runs the workflow file AS IT EXISTS ON THE
+# SELECTED REF. A collaborator with write access can push a branch whose copy of
+# THIS file has the `if:` guard removed, then dispatch it against that branch -
+# the guard lives in the very file they control, so it cannot by itself keep the
+# secret off a non-default ref. The `if: github.ref == 'refs/heads/master'`
+# guard below is therefore a guard against ACCIDENTAL mis-dispatch of the
+# unmodified file, NOT a security boundary.
+#
+# THE AUTHORITATIVE BACKSTOP IS A REPO SETTING, NOT THIS YAML
+# ----------------------------------------------------------
+# The control YAML cannot express - and an attacker editing this file cannot
+# strip - is the `release` GitHub ENVIRONMENT's protection rule. It is MANDATORY
+# setup for this gate (repo Settings -> Environments -> release):
+#   - Deployment branches: restrict to the default branch (master) ONLY. GitHub
+#     then refuses to expose the environment secret to any run whose ref is not
+#     the default branch, regardless of what this file says.
+#   - Required reviewers: at least one trusted maintainer, so a dispatched run
+#     pauses for human approval before the secret-bearing job can start.
+# Without that environment protection rule configured in repo settings, the
+# denylist secret is NOT adequately protected: the YAML alone does not secure it.
+# See CONTRIBUTING.md ("Mandatory release-environment setup").
+#
+# PUBLISH MODEL: this workflow is POST-MERGE defense-in-depth. It runs on the
+# already-published repo AFTER content reaches master; it is NOT the primary
+# barrier. The AUTHORITATIVE gate run happens on the CLEAN EXPORT /
+# publication-candidate repo - a single orphan-root commit built from TRACKED
+# CONTENT ONLY (Step 16: an orphan-root commit / `git archive` of tracked files,
+# never a filesystem copy that could include git-ignored files) - immediately
+# before publication, and NOT on the long-lived dev repo (whose --all-refs
+# history tier stays RED by design on a preserved early development blob). The
+# literal-denylist tier is inherently post-merge: it needs the maintainer secret,
+# which can never be exposed to an untrusted fork PR. The denylist is materialized
+# in RUNNER_TEMP (outside the checked-out workspace), so it satisfies the gate's
+# outside-tree guard.
+
+name: NG-0 release gate
+
+on:
+  # Runs when the protected default branch is updated.
+  push:
+    branches: [master]
+  # Manual maintainer trigger (kept - manual release-gate runs are useful). The
+  # job `if:` below blocks an ACCIDENTAL dispatch from a non-default ref, but the
+  # real protection for the denylist secret on a dispatched run is the `release`
+  # environment's protection rule (see the WHO MAY READ note above), not this YAML.
+  workflow_dispatch:
+
+# Least privilege: only read the checked-out code.
+permissions:
+  contents: read
+
+jobs:
+  ng0-release-scan:
+    name: NG-0 full scan (denylist + all-refs history)
+    runs-on: ubuntu-latest
+    # Accidental-misdispatch guard, NOT a security boundary: for
+    # workflow_dispatch GitHub runs this file from the selected ref, so a
+    # collaborator could dispatch a branch whose copy of this file drops the
+    # guard. The denylist secret is actually protected by the `release`
+    # environment's deployment-branch restriction + required reviewers (a repo
+    # setting - see the WHO MAY READ note above), which this YAML cannot enforce.
+    if: github.ref == 'refs/heads/master'
+    # Environment-scoped secret. The `release` environment MUST be configured in
+    # repo settings with a deployment-branch restriction limiting it to the
+    # default branch AND required reviewers (see CONTRIBUTING.md). That repo
+    # setting - not the `if:` above - is the authoritative control that keeps the
+    # denylist secret off any non-default ref. Without it this gate is not secure.
+    environment: release
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 pulls ALL history for ALL branches and tags. A shallow
+          # clone would miss a secret that was committed and later deleted, or a
+          # secret living on a side branch or tag - exactly what the git-history
+          # scan exists to catch. This is mandatory for the release gate.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Materialize denylist from secret
+        # The secret is passed through an env var (never interpolated directly
+        # into the shell) and written to a runner-temp file. RUNNER_TEMP is
+        # cleaned up when the job ends. The file path is handed to the gate via
+        # NG0_DENYLIST in the next step.
+        env:
+          NG0_DENYLIST_CONTENT: ${{ secrets.NG0_DENYLIST }}
+        run: |
+          if [ -z "${NG0_DENYLIST_CONTENT}" ]; then
+            echo "NG0_DENYLIST secret is empty or unset - refusing to run a" >&2
+            echo "silently-empty maintainer scan." >&2
+            exit 1
+          fi
+          printf '%s\n' "${NG0_DENYLIST_CONTENT}" > "${RUNNER_TEMP}/ng0-denylist.txt"
+
+      - name: Run NG-0 pre-publish gate (full maintainer tier)
+        # Same script the maintainer runs locally: full-tree scan + all-refs
+        # git-history scan (both --with-denylist) + scoped template-lint.
+        env:
+          NG0_DENYLIST: ${{ runner.temp }}/ng0-denylist.txt
+        run: bash scripts/ng0/prepublish_gate.sh

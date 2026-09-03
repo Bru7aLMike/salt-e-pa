@@ -1,0 +1,20 @@
+{
+  "_comment": "Salt-e PA settings template. Copy this to ~/.claude/settings.json, or merge just the 'hooks' block into your existing settings.json. Replace every <REPO_ROOT> with the ABSOLUTE path to your clone of this repo (Claude Code requires absolute paths in hook commands), for example /home/you/salt-e-pa or C:/Users/you/salt-e-pa. This template wires ONLY the two generic SessionStart hooks the scaffold ships and carries no permissions, env, statusLine, or plugin keys - add those yourself. See docs/automation.md for the walkthrough.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash <REPO_ROOT>/scripts/has/has-session-start.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash <REPO_ROOT>/scripts/inject-unslop.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

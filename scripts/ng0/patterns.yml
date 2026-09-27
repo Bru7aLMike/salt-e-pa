@@ -1,0 +1,117 @@
+# NG-0 secret + PII pattern rules (committed, generic).
+#
+# This file contains ZERO literal personal identifiers. It ships publicly.
+# Literal personal strings live only in the git-ignored denylist.local.txt
+# and are loaded at scan time by `secret_pii_scan.py --with-denylist`.
+#
+# Both scanner tiers load this file:
+#   --patterns-only  -> these rules only (safe on forked PRs, no literals)
+#   --with-denylist  -> these rules PLUS the literal denylist (maintainer-only)
+
+version: 1
+
+# Paths excluded from DEFAULT scans (tree mode and git-history mode).
+# Matching is by repo-relative posix path: an entry ending in "/" matches
+# that directory and everything under it; other entries are matched as a
+# literal prefix or an fnmatch glob.
+#
+# EXCLUDE MECHANISM NAME: "default_exclude" (this `exclude:` list).
+# Only .git/ is excluded: git internals are never tracked, so excluding them is
+# not a publish-gate blind spot. The scanner locks this to the sanctioned set in
+# SANCTIONED_EXCLUDES (secret_pii_scan.py) - any entry beyond it is dropped with
+# a warning and STILL scanned. scripts/ng0/tests/ is deliberately NOT excluded
+# (F2): the self-test generates its secret-shaped fixtures at test time and
+# assembles its probes from fragments, so nothing under tests/ is secret-shaped
+# and the whole tracked tree is scanned with no blind spot.
+exclude:
+  - ".git/"
+
+# --- Secret detection: named regex rules ------------------------------------
+# Each rule: name + regex. A match anywhere in a scanned file is a finding.
+secret_patterns:
+  - name: private-key-block
+    regex: '-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----'
+  - name: aws-access-key-id
+    regex: '\bAKIA[0-9A-Z]{16}\b'
+  - name: slack-token
+    regex: '\bxox[baprs]-[0-9A-Za-z]{10,}'
+  - name: github-token
+    regex: '\bgh[pousr]_[0-9A-Za-z]{36,}\b'
+  - name: google-api-key
+    regex: '\bAIza[0-9A-Za-z_\-]{35}\b'
+  - name: stripe-secret-key
+    regex: '\bsk_(?:live|test)_[0-9A-Za-z]{16,}\b'
+  - name: jwt-token
+    regex: '\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}'
+  - name: generic-secret-assignment
+    # key/secret/token/password style assignment. Handles quoted AND unquoted
+    # values (.env / YAML / JSON) of >= 12 chars. The key must sit at a real
+    # assignment boundary - line start (optionally a YAML sequence-item prefix
+    # `- `, then optionally `export ` or an opening quote), OR immediately after
+    # a JSON object `{` or a `,` separator (both compact `{"token":"..."}` and
+    # multi-field `{...,"token":"..."}` forms, and pretty-printed JSON where the
+    # key is on its own indented line via the line start branch). The `- ` prefix
+    # covers YAML list items like `- client_secret: ...` and `- token: "..."`
+    # (H4-residual-2). This boundary keeps it off keyword alternations inside
+    # this file's own regex definitions, which are followed by `|`/`)` and never
+    # by `[:=]`. The value classes exclude { } < > so template placeholders like
+    # {{PASSWORD}} and <SECRET> are not mistaken for filled secrets, and they
+    # stop at a trailing `,`/`}` so a JSON value is delimited correctly (H4).
+    regex: '(?im)(?:^|[{,])\s*(?:-\s+)?(?:export\s+)?["'']?(?:client[_-]?secret|refresh[_-]?token|access[_-]?token|auth[_-]?token|access[_-]?key|secret[_-]?key|session[_-]?key|encryption[_-]?key|signing[_-]?key|private[_-]?key|api[_-]?key|apikey|password|passwd|secret|token|bearer|credentials?)["'']?\s*[:=]\s*(?:"[^"\n{}<>]{12,}"|''[^''\n{}<>]{12,}''|[^\s"''#{}<>]{12,})'
+
+# --- PII detection: named regex rules ---------------------------------------
+pii_patterns:
+  - name: email-address
+    regex: '\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'
+  - name: phone-number-intl
+    # International-format phone: mandatory leading + and 8-15 digits, with
+    # optional spaces/dashes/parens. The mandatory + keeps this off dates,
+    # version strings, and regex quantifiers.
+    regex: '(?<![\w+])\+\d(?:[\d\s().\-]{6,16}\d)'
+  - name: phone-number-na
+    # National/local phone in the AREA-PREFIX-LINE grouping (three, three, four
+    # digits) with dash, dot, space, or parenthesized-area-code separators. The
+    # required separators + grouping keep it off bare 10-digit IDs and dates;
+    # the digit-boundary guards keep it off longer numeric runs. Caught by
+    # PATTERN, so it no longer relies on denylist coverage of every literal
+    # variant (M2). Concrete example strings live only in the excluded test
+    # fixtures, never here, so this rule does not self-match.
+    regex: '(?<![\d\w])(?:\(\d{3}\)[ .\-]?|\d{3}[ .\-])\d{3}[ .\-]\d{4}(?![\d\w])'
+  - name: social-handle
+    # at-sign handle of 3+ chars. The preceding-char guard keeps it off
+    # email local parts.
+    regex: '(?<![\w@./])@[A-Za-z0-9_]{3,}\b'
+
+# --- Secret detection: Shannon-entropy heuristics ---------------------------
+# Catches high-entropy tokens (random API keys, base64 blobs, hex keys) that no
+# named regex covers. Each heuristic extracts tokens by its own charset, then
+# flags a token when its length >= min_length AND its Shannon entropy
+# (bits/char) meets that alphabet's threshold. Thresholds are per-alphabet
+# because the maximum achievable entropy differs (hex maxes at 4.0 bits/char,
+# base32 at 5.0, base64/base64url at 6.0). There is NO blunt "2+ slash" skip:
+# a real secret can contain slashes (standard base64) or be pure hex (H3).
+entropy:
+  enabled: true
+  heuristics:
+    # URL-safe + standard base64 alphabet (adds - and _ so base64url tokens are
+    # tokenized). Threshold 4.5 keeps ordinary identifiers and paths clear.
+    - name: high-entropy-base64url
+      charset_regex: '[A-Za-z0-9+/=_\-]{24,}'
+      min_length: 24
+      threshold: 4.5
+    # Long hex runs (keys, digests used as tokens). Hex tops out at 4.0
+    # bits/char, so it needs its own lower threshold and a longer min length to
+    # stay off short hex fragments. An optional 0x/0X prefix is accepted and
+    # stripped before length + entropy are measured, so `0x`-framed hex secrets
+    # (bare or JSON-wrapped) are caught on the 40-char payload, not missed
+    # because the `x` breaks the preceding-char boundary (H3-residual).
+    - name: high-entropy-hex
+      charset_regex: '(?<![0-9A-Za-z])(?:0[xX])?[0-9a-fA-F]{40,}(?![0-9A-Za-z])'
+      min_length: 40
+      threshold: 3.5
+      strip_prefixes: ["0x", "0X"]
+    # Base32 (RFC 4648) - e.g. TOTP seeds, some token formats.
+    - name: high-entropy-base32
+      charset_regex: '(?<![0-9A-Za-z])[A-Z2-7]{32,}={0,6}(?![0-9A-Za-z])'
+      min_length: 32
+      threshold: 4.0
